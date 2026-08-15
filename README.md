@@ -48,17 +48,30 @@ adb reboot
 ## Waydroid setup
 
 The required vendor overlay and libhybris build are already included in the
-image. After first boot:
+image. The Android system/vendor images are **not** shipped — download them
+manually. Do not use plain `waydroid init`: it fetches MAINLINE images from
+the OTA server, which do not work on this port.
+
+- System: <https://sourceforge.net/projects/waydroid/files/images/system/lineage/waydroid_arm64/>
+  (lineage-17.1 VANILLA arm64)
+- Vendor: <https://sourceforge.net/projects/waydroid/files/images/vendor/waydroid_arm64/>
+  (lineage-17.1 **HALIUM_10** arm64 — e.g.
+  `lineage-17.1-20260402-HALIUM_10-waydroid_arm64-vendor.zip`)
+
+Unzip both, put `system.img` and `vendor.img` into
+`/etc/waydroid-extra/images/`, then as root:
 
 ```sh
-devel-su
-waydroid init -f   # HALIUM_10 vendor type, arm64 images (lineage-17.1 system
-                   # + halium-10 vendor from the Waydroid SourceForge channel)
+waydroid init -f    # must report "found custom images"
 ```
 
-Then apply the post-init corrections documented in
-[PORT-NOTES](https://github.com/smatkovi/droid-config-sony-loire/blob/kugo-sfos51/PORT-NOTES.md)
-(waydroid.cfg vendor_type/binder names, config_nodes anbox-* sources).
+After every `init -f`, apply the post-init corrections (init regenerates the
+configs): in `/var/lib/waydroid/waydroid.cfg` set `vendor_type = HALIUM_10`,
+switch binder/vndbinder/hwbinder to the `anbox-*` devices and set
+`binder_protocol` / `service_manager_protocol` to `aidl2`; in
+`/var/lib/waydroid/lxc/waydroid/config_nodes` point the binder mount entries
+at the `anbox-*` device sources. Exact sed commands: see
+[PORT-NOTES](https://github.com/smatkovi/droid-config-sony-loire/blob/kugo-sfos51/PORT-NOTES-kugo.md).
 
 **Do not add any of the following to /var/lib/waydroid/overlay:**
 `hwcomposer.*.so`, `android.hardware.graphics.composer@2.1-impl.so`,
