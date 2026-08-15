@@ -65,13 +65,47 @@ Unzip both, put `system.img` and `vendor.img` into
 waydroid init -f    # must report "found custom images"
 ```
 
-After every `init -f`, apply the post-init corrections (init regenerates the
-configs): in `/var/lib/waydroid/waydroid.cfg` set `vendor_type = HALIUM_10`,
-switch binder/vndbinder/hwbinder to the `anbox-*` devices and set
-`binder_protocol` / `service_manager_protocol` to `aidl2`; in
-`/var/lib/waydroid/lxc/waydroid/config_nodes` point the binder mount entries
-at the `anbox-*` device sources. Exact sed commands: see
-[PORT-NOTES](https://github.com/smatkovi/droid-config-sony-loire/blob/kugo-sfos51/PORT-NOTES-kugo.md).
+After every `init -f` the following corrections are required
+(`init -f` regenerates both files and reverts them each time). Verified
+against a working device; run as root:
+
+```sh
+# (1)+(2) waydroid.cfg: HALIUM_10 vendor type, custom images path,
+#         anbox-* binder devices, aidl2 protocols
+CFG=/var/lib/waydroid/waydroid.cfg
+sed -i \
+  -e 's|^vendor_type *=.*|vendor_type = HALIUM_10|' \
+  -e 's|^images_path *=.*|images_path = /etc/waydroid-extra/images|' \
+  -e 's|^binder *=.*|binder = anbox-binder|' \
+  -e 's|^vndbinder *=.*|vndbinder = anbox-vndbinder|' \
+  -e 's|^hwbinder *=.*|hwbinder = anbox-hwbinder|' \
+  $CFG
+grep -q '^binder_protocol' $CFG || \
+  sed -i '/^hwbinder/a binder_protocol = aidl2
+service_manager_protocol = aidl2' $CFG
+sed -i \
+  -e 's|^binder_protocol *=.*|binder_protocol = aidl2|' \
+  -e 's|^service_manager_protocol *=.*|service_manager_protocol = aidl2|' \
+  $CFG
+
+# (3) config_nodes: mount the anbox-* host devices, NOT the host binders
+#     (source changes, the in-container target dev/... stays as is —
+#      otherwise servicemanager fails with "Device or resource busy")
+NODES=/var/lib/waydroid/lxc/waydroid/config_nodes
+sed -i \
+  -e 's|^lxc.mount.entry = /dev/binder dev/binder |lxc.mount.entry = /dev/anbox-binder dev/binder |' \
+  -e 's|^lxc.mount.entry = /dev/vndbinder dev/vndbinder |lxc.mount.entry = /dev/anbox-vndbinder dev/vndbinder |' \
+  -e 's|^lxc.mount.entry = /dev/hwbinder dev/hwbinder |lxc.mount.entry = /dev/anbox-hwbinder dev/hwbinder |' \
+  $NODES
+
+# dnsmasq blocks waydroid-net's listening socket on 192.168.240.1:
+systemctl disable --now dnsmasq
+```
+
+Verify: `waydroid.cfg` must contain `vendor_type = HALIUM_10`, the three
+`binder` entries pointing at `anbox-*`, both protocols `aidl2`; the three
+binder lines in `config_nodes` must have `/dev/anbox-*` as source. More
+background (in German): [PORT-NOTES](https://github.com/smatkovi/droid-config-sony-loire/blob/kugo-sfos51/PORT-NOTES-kugo.md).
 
 **Do not add any of the following to /var/lib/waydroid/overlay:**
 `hwcomposer.*.so`, `android.hardware.graphics.composer@2.1-impl.so`,
