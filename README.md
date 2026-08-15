@@ -1,103 +1,73 @@
-# harbour-whatsapp
+# Sailfish OS for Sony Xperia X Compact (kugo)
 
-Native WhatsApp client for Sailfish OS using whatsmeow library.
+Community port of Sailfish OS 5.1.0.11 (Pispala) for the Sony Xperia X Compact
+(F5321, msm8956), based on hybris-sony-aosp-8.1 with kernel 4.4.
 
-## Requirements
+**Working:** UI, telephony (calls/audio), mobile data, WLAN, Bluetooth, sensors,
+fingerprint, camera (photo + video), Waydroid (Android apps) — out of the box.
 
-- Sailfish OS 4.5+ device (tested on 5.1, Xperia 10 V)
-- For building: Go **1.25 or newer** (the whatsmeow dependency requires it)
+Sources: [droid-config](https://github.com/smatkovi/droid-config-sony-loire/tree/kugo-sfos51) ·
+[kernel](https://github.com/smatkovi/android_kernel_sony_msm/tree/kugo-sfos51)
 
-## Installing (prebuilt RPM)
+## Prerequisites
 
-Download the RPM for your architecture (aarch64 for most modern devices,
-armv7hl for older 32-bit ones) from OpenRepos or the GitHub releases, then:
+- Xperia X Compact with **unlocked bootloader** and Sony OEM/stock firmware
+  flashed at least once (vendor blobs on /oem are required)
+- PC with `adb`, `fastboot`, `lbzip2` (or `bzip2`)
+- TWRP for kugo (twrp-3.7.0_9-0-kugo.img) — from twrp.me, used only via
+  `fastboot boot`, your recovery partition is not touched
+- Files from the [latest release](../../releases): rootfs `*.tar.bz2` and
+  `hybris-boot.img`
 
-```bash
-devel-su rpm -U ~/Downloads/harbour-whatsapp-*.rpm
+## Flashing
+
+Put the release files and the TWRP image into one directory, then:
+
+```sh
+chmod +x flash-kugo.sh
+./flash-kugo.sh <directory>
 ```
 
-On first start, pair the app as a linked device: WhatsApp on your phone →
-Settings → Linked devices → Link with phone number, and enter the pairing
-code the app shows. The app ships with minimal sandbox permissions
-(Internet, Secrets); optional features are enabled by copy-paste commands
-found in the app's Settings page:
-- **Media storage** access (save/pick files outside the sandbox)
-- **Location** (send your position / share live location)
-- **Contacts** (address book suggestions, opt-in inside the app as well)
+The script decompresses the rootfs locally (TWRP's busybox has no bunzip2),
+flashes hybris-boot via fastboot, boots TWRP once, formats /data after an
+explicit confirmation, pushes the tar and extracts it directly to /data
+(on kugo the /data partition root *is* the rootfs — no .stowaways subdir).
 
-Encryption of the local database strictly requires Sailfish Secrets - the
-app refuses to run unencrypted and will guide you through a reset if an
-old unencrypted database is found.
+Manual steps, if you prefer doing it by hand:
 
-## Building from source
-
-### A) On the Sailfish device itself
-
-Go 1.25+ is not in the Jolla repos, but community repositories carry it.
-With the Rikudou_Sennin OpenRepos repository enabled (via Storeman):
-
-```bash
-# Toolchain + build dependencies
-devel-su zypper in --repo openrepos-Rikudou_Sennin go
-devel-su pkcon install gcc sqlcipher-devel rpm-build
-
-git clone https://github.com/smatkovi/harbour-whatsapp.git
-cd harbour-whatsapp
-./build.sh
-
-devel-su rpm -U ~/rpmbuild/RPMS/$(uname -m)/harbour-whatsapp-*.rpm
+```sh
+lbzip2 -dk sfe-kugo-*.tar.bz2
+fastboot flash boot hybris-boot.img
+fastboot boot twrp-3.7.0_9-0-kugo.img
+# in TWRP: Wipe -> Format Data -> yes
+adb push sfe-kugo-*.tar /data/rootfs.tar
+adb shell 'cd /data && tar --numeric-owner -xf rootfs.tar && rm rootfs.tar && sync'
+adb reboot
 ```
 
-This builds the backend dynamically against the device's SQLCipher.
+## Waydroid setup
 
-### B) Cross-compiling on a Linux desktop (recommended)
+The required vendor overlay and libhybris build are already included in the
+image. After first boot:
 
-Produces fully static backend binaries - no runtime dependencies on the
-device beyond a stock Sailfish OS:
-
-```bash
-# Debian/Ubuntu example
-sudo apt install golang gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf rpm
-
-git clone https://github.com/smatkovi/harbour-whatsapp.git
-cd harbour-whatsapp/backend
-
-VERSION=$(grep '^Version:' ../rpm/harbour-whatsapp.spec | awk '{print $2}')
-
-# aarch64 (64-bit devices)
-CGO_ENABLED=1 GOOS=linux GOARCH=arm64 CC=aarch64-linux-gnu-gcc \
-  go build -tags netgo,osusergo \
-  -ldflags "-s -w -X main.version=$VERSION -linkmode external -extldflags '-static'" \
-  -o wa-backend .
-
-# armv7hl (32-bit devices): GOARCH=arm GOARM=7 CC=arm-linux-gnueabihf-gcc
-
-# Then package (see rpm/harbour-whatsapp.spec; sources are the wa-backend
-# binary plus qml/, start_backend.py, harbour-whatsapp.desktop, icons/)
+```sh
+devel-su
+waydroid init -f   # HALIUM_10 vendor type, arm64 images (lineage-17.1 system
+                   # + halium-10 vendor from the Waydroid SourceForge channel)
 ```
 
-The committed `go.sum` makes builds reproducible - a fresh clone compiles
-without running `go mod tidy` first.
+Then apply the post-init corrections documented in
+[PORT-NOTES](https://github.com/smatkovi/droid-config-sony-loire/blob/kugo-sfos51/PORT-NOTES.md)
+(waydroid.cfg vendor_type/binder names, config_nodes anbox-* sources).
 
-## Structure
-```
-harbour-whatsapp-src/
-├── backend/           # Go source files
-│   ├── main.go
-│   ├── secrets.go
-│   ├── go.mod
-│   └── go.sum
-├── qml/               # QML UI
-│   └── harbour-whatsapp.qml
-├── icons/             # App icons
-│   └── hicolor/
-├── rpm/               # RPM spec
-│   └── harbour-whatsapp.spec
-├── harbour-whatsapp.desktop
-├── build.sh
-└── README.md
-```
+**Do not add any of the following to /var/lib/waydroid/overlay:**
+`hwcomposer.*.so`, `android.hardware.graphics.composer@2.1-impl.so`,
+`android.hardware.graphics.mapper@2.0-impl.so`. A vendor hwcomposer in the
+overlay makes SurfaceFlinger delegate composition to hardware that is not
+reachable from the container (DEVICE instead of CLIENT composition) — the
+result is a permanently black Waydroid window.
 
-## License
+## Disclaimer
 
-MIT
+Flashing wipes your data and can brick your device. No warranty. Not affiliated
+with Jolla or Sony.
