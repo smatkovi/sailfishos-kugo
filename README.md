@@ -11,11 +11,22 @@ Sources: [droid-config](https://github.com/smatkovi/droid-config-sony-loire/tree
 
 ## Prerequisites
 
-- Xperia X Compact with **unlocked bootloader** and Sony OEM/stock firmware
-  flashed at least once (vendor blobs on /oem are required)
+- Xperia X Compact with **unlocked bootloader** (Sony official method;
+  this permanently destroys the DRM keys)
+- Stock firmware and the Sony AOSP **OEM binary v13 (loire)** flashed at
+  least once — the vendor blobs on /oem are required. Sony no longer lists
+  these downloads prominently; working sources:
+  - Stock firmware for F5321 (third-party XperiFirm archive):
+    <https://samsony.net/en/firmwares/sony/F5321/download/1660> —
+    flash it with [newflasher](https://github.com/munjeni/newflasher)
+    or [xflasher](https://github.com/munjeni/xflasher)
+  - Sony OEM binary (AOSP Oreo 8.1, kernel 4.9, loire):
+    <https://opendevices.sony.net/file/download/software-binaries-for-aosp-oreo-android-8-1-kernel-4-9-loire> —
+    `fastboot flash oem SW_binaries_*loire*.img`
 - PC with `adb`, `fastboot`, `lbzip2` (or `bzip2`)
-- TWRP for kugo (twrp-3.7.0_9-0-kugo.img) — from twrp.me, used only via
-  `fastboot boot`, your recovery partition is not touched
+- TWRP for kugo (twrp-3.7.0_9-0-kugo.img) from twrp.me. **Note:** the kugo
+  bootloader does not support `fastboot boot`, so TWRP has to be flashed to
+  the recovery partition (this overwrites any existing recovery).
 - Files from the [latest release](../../releases): rootfs `*.tar.bz2` and
   `hybris-boot.img`
 
@@ -29,17 +40,20 @@ chmod +x flash-kugo.sh
 ```
 
 The script decompresses the rootfs locally (TWRP's busybox has no bunzip2),
-flashes hybris-boot via fastboot, boots TWRP once, formats /data after an
-explicit confirmation, pushes the tar and extracts it directly to /data
-(on kugo the /data partition root *is* the rootfs — no .stowaways subdir).
+flashes hybris-boot and TWRP via fastboot, then pauses: boot into TWRP by
+holding **Power + Volume-Down** (the kugo bootloader cannot stream a
+recovery via `fastboot boot`). After you confirm, it formats /data, pushes
+the tar and extracts it directly to /data (on kugo the /data partition root
+*is* the rootfs — no .stowaways subdir).
 
 Manual steps, if you prefer doing it by hand:
 
 ```sh
 lbzip2 -dk sfe-kugo-*.tar.bz2
 fastboot flash boot hybris-boot.img
-fastboot boot twrp-3.7.0_9-0-kugo.img
-# in TWRP: Wipe -> Format Data -> yes
+fastboot flash recovery twrp-3.7.0_9-0-kugo.img
+# unplug USB, power off, hold Power + Volume-Down until TWRP appears
+# in TWRP: Wipe -> Format Data -> yes, then plug USB back in
 adb push sfe-kugo-*.tar /data/rootfs.tar
 adb shell 'cd /data && tar --numeric-owner -xf rootfs.tar && rm rootfs.tar && sync'
 adb reboot

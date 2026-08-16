@@ -1,27 +1,34 @@
 #!/bin/bash
-# flash-kugo.sh — SFOS-Image auf Xperia X Compact (kugo) flashen
-# Workflow: etabliert beim v16clean-Flash (Aug 2026)
-#   - Rootfs-bz2 wird LOKAL dekomprimiert (TWRPs busybox kann kein bunzip2!)
-#   - hybris-boot via fastboot, TWRP nur per "fastboot boot" (recovery bleibt unberührt)
-#   - kugo-Layout: mmcblk0p51-Wurzel IST das Rootfs -> tar direkt nach /data
+# flash-kugo.sh — flash a SailfishOS image to the Sony Xperia X Compact (kugo)
+# v2: the kugo bootloader does NOT support 'fastboot boot'
+#     (thanks ahjolinna) -> TWRP is flashed to the recovery
+#     partition and booted via key combination.
 #
-# Aufruf:  ./flash-kugo.sh <image-verzeichnis>
-# Beispiel: ./flash-kugo.sh ~/Downloads/kugo-flash/sfe-kugo-waydroidfix-20260815
+# Workflow:
+#   - the rootfs .bz2 is decompressed LOCALLY (TWRP's busybox has no bunzip2!)
+#   - hybris-boot + TWRP are flashed via fastboot
+#   - kugo layout: the /data partition root IS the rootfs -> tar extracts
+#     directly to /data (no .stowaways subdirectory)
 #
-# Voraussetzungen: adb, fastboot, lbzip2 (oder bzip2), TWRP-Image daneben oder in CWD
+# Usage:   ./flash-kugo.sh <image-directory>
+# Example: ./flash-kugo.sh ~/Downloads/kugo-flash/sfe-kugo-waydroidfix-20260815
+#
+# Requirements: adb, fastboot, lbzip2 (or bzip2), TWRP image next to the
+# script or in the image directory. Stock firmware + Sony OEM binary v13
+# must have been flashed once (see README).
 
 set -euo pipefail
 
-IMGDIR="${1:?Aufruf: $0 <verzeichnis mit tar.bz2 + hybris-boot.img>}"
+IMGDIR="${1:?Usage: $0 <directory with tar.bz2 + hybris-boot.img>}"
 TWRP="${TWRP:-twrp-3.7.0_9-0-kugo.img}"
 
-# --- Dateien finden -------------------------------------------------------
+# --- locate files ----------------------------------------------------------
 TARBZ2=$(ls "$IMGDIR"/*.tar.bz2 2>/dev/null | head -1) || true
 BOOTIMG=$(ls "$IMGDIR"/hybris-boot.img 2>/dev/null | head -1) || true
-[ -n "$TARBZ2" ]  || { echo "FEHLER: kein *.tar.bz2 in $IMGDIR"; exit 1; }
-[ -n "$BOOTIMG" ] || { echo "FEHLER: kein hybris-boot.img in $IMGDIR"; exit 1; }
+[ -n "$TARBZ2" ]  || { echo "ERROR: no *.tar.bz2 in $IMGDIR"; exit 1; }
+[ -n "$BOOTIMG" ] || { echo "ERROR: no hybris-boot.img in $IMGDIR"; exit 1; }
 [ -f "$TWRP" ] || TWRP="$IMGDIR/$TWRP"
-[ -f "$TWRP" ] || { echo "FEHLER: TWRP-Image nicht gefunden (TWRP=$TWRP setzen)"; exit 1; }
+[ -f "$TWRP" ] || { echo "ERROR: TWRP image not found (set TWRP=/path/to/twrp.img)"; exit 1; }
 
 TAR="${TARBZ2%.bz2}"
 
@@ -29,63 +36,75 @@ echo "== Rootfs:  $TARBZ2"
 echo "== Boot:    $BOOTIMG"
 echo "== TWRP:    $TWRP"
 echo
+echo "!! NOTE: TWRP will be FLASHED to the recovery partition"
+echo "!! (the kugo bootloader does not support 'fastboot boot')."
+echo "!! Any existing recovery will be overwritten."
+echo
 
-# --- 1. Dekomprimieren (TWRP kann kein bunzip2) ---------------------------
+# --- 1. decompress (TWRP has no bunzip2) -----------------------------------
 if [ ! -f "$TAR" ]; then
-    echo "== Dekomprimiere (kann 1-2 Min dauern)..."
+    echo "== Decompressing (may take 1-2 minutes)..."
     if command -v lbzip2 >/dev/null; then lbzip2 -dk "$TARBZ2"
     else bzip2 -dk "$TARBZ2"; fi
 fi
-echo "== Entpackt: $(du -h "$TAR" | cut -f1)"
+echo "== Decompressed: $(du -h "$TAR" | cut -f1)"
 
-# --- 2. In den Bootloader -------------------------------------------------
+# --- 2. enter the bootloader -------------------------------------------------
 echo
-echo "== Geraet in den Fastboot-Modus bringen:"
-echo "   - laeuft SFOS/Android mit adb: wird automatisch versucht"
-echo "   - sonst: ausschalten, Vol-Up halten + USB anstecken (blaue LED)"
+echo "== Put the device into fastboot mode:"
+echo "   - if SFOS/Android with adb is running: attempted automatically"
+echo "   - otherwise: power off, hold Vol-UP + plug in USB (blue LED)"
 adb reboot bootloader 2>/dev/null || true
-echo "== Warte auf fastboot..."
+echo "== Waiting for fastboot..."
 fastboot devices | grep -q . || { while ! fastboot devices | grep -q .; do sleep 2; done; }
 fastboot devices
 
-# --- 3. Boot flashen, TWRP einmalig booten --------------------------------
+# --- 3. flash boot + TWRP -----------------------------------------------------
 echo
-echo "== Flashe hybris-boot..."
+echo "== Flashing hybris-boot..."
 fastboot flash boot "$BOOTIMG"
-echo "== Boote TWRP (einmalig, recovery-Partition bleibt unberuehrt)..."
-fastboot boot "$TWRP"
+echo "== Flashing TWRP to recovery..."
+fastboot flash recovery "$TWRP"
 
 echo
-echo "== Warte auf TWRP/adb..."
+echo "=============================================================="
+echo ">> NOW BOOT INTO TWRP MANUALLY:"
+echo "   1. unplug the USB cable"
+echo "   2. power the device off (hold Power if needed)"
+echo "   3. hold Power + Volume-DOWN until TWRP appears"
+echo "   4. plug the USB cable back in"
+echo "=============================================================="
+read -rp ">> Press Enter once TWRP is running and USB is connected... " _
+
+echo "== Waiting for TWRP/adb..."
 adb wait-for-device
 sleep 3
 
-# --- 4. Data formatieren ---------------------------------------------------
+# --- 4. format data ------------------------------------------------------------
 echo
-read -rp ">> ACHTUNG: /data wird GELOESCHT (Format Data). Fortfahren? [yes/NO] " ANS
-[ "$ANS" = "yes" ] || { echo "Abgebrochen."; exit 1; }
-# Format Data via twrp-Kommando (zuverlaessiger als wipe bei f2fs/ext4-Wechseln)
-adb shell twrp format data || { echo "twrp format data fehlgeschlagen - in TWRP manuell: Wipe -> Format Data -> yes; dann Enter"; read -r; }
+read -rp ">> WARNING: /data will be ERASED (Format Data). Continue? [yes/NO] " ANS
+[ "$ANS" = "yes" ] || { echo "Aborted."; exit 1; }
+adb shell twrp format data || { echo "twrp format data failed - in TWRP do: Wipe -> Format Data -> yes; then press Enter"; read -r; }
 sleep 2
 adb shell mount /data 2>/dev/null || true
 
-# --- 5. Rootfs pushen & entpacken ------------------------------------------
+# --- 5. push & extract rootfs ---------------------------------------------------
 echo
-echo "== Push Rootfs-Tar ($(du -h "$TAR" | cut -f1)) - dauert ein paar Minuten..."
+echo "== Pushing rootfs tar ($(du -h "$TAR" | cut -f1)) - takes a few minutes..."
 adb push "$TAR" /data/rootfs.tar
-echo "== Entpacke auf dem Geraet..."
+echo "== Extracting on the device..."
 adb shell 'cd /data && tar --numeric-owner -xf rootfs.tar && rm rootfs.tar && sync'
 
-# --- 6. Reboot --------------------------------------------------------------
+# --- 6. reboot -------------------------------------------------------------------
 echo
-echo "== Fertig - Reboot ins frische SFOS..."
+echo "== Done - rebooting into fresh SFOS..."
 adb reboot
 
 echo
 echo "=============================================================="
-echo "Nach dem ersten Boot (Ersteinrichtung abwarten):"
+echo "After first boot (let the setup wizard finish):"
 echo "  zypper se -i waydroid"
-echo "  ls /var/lib/waydroid/overlay/vendor/lib64/    # 15 Dateien?"
+echo "  ls /var/lib/waydroid/overlay/vendor/lib64/    # 15 files?"
 echo "  rpm -qa | grep libhybris                      # 2b39e63?"
-echo "Dann waydroid init gemaess PORT-NOTES (HALIUM_10)."
+echo "Then set up Waydroid as described in the README (init -f + sed fixes)."
 echo "=============================================================="
