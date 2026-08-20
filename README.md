@@ -43,8 +43,8 @@ The script decompresses the rootfs locally (TWRP's busybox has no bunzip2),
 flashes hybris-boot and TWRP via fastboot, then pauses: boot into TWRP by
 holding **Power + Volume-Down** (the kugo bootloader cannot stream a
 recovery via `fastboot boot`). After you confirm, it formats /data, pushes
-the tar and extracts it directly to /data (on kugo the /data partition root
-*is* the rootfs — no .stowaways subdir).
+the tar and extracts it to `/data/.stowaways/sailfishos` — the standard
+hybris location where hybris-boot bind-mounts the rootfs from.
 
 Manual steps, if you prefer doing it by hand:
 
@@ -55,7 +55,7 @@ fastboot flash recovery twrp-3.7.0_9-0-kugo.img
 # unplug USB, power off, hold Power + Volume-Down until TWRP appears
 # in TWRP: Wipe -> Format Data -> yes, then plug USB back in
 adb push sfe-kugo-*.tar /data/rootfs.tar
-adb shell 'cd /data && tar --numeric-owner -xf rootfs.tar && rm rootfs.tar && sync'
+adb shell 'mkdir -p /data/.stowaways/sailfishos && cd /data/.stowaways/sailfishos && tar --numeric-owner -xf /data/rootfs.tar && rm /data/rootfs.tar && sync'
 adb reboot
 ```
 

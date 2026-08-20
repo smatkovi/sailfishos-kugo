@@ -7,8 +7,8 @@
 # Workflow:
 #   - the rootfs .bz2 is decompressed LOCALLY (TWRP's busybox has no bunzip2!)
 #   - hybris-boot + TWRP are flashed via fastboot
-#   - kugo layout: the /data partition root IS the rootfs -> tar extracts
-#     directly to /data (no .stowaways subdirectory)
+#   - standard hybris layout: hybris-boot bind-mounts
+#     /data/.stowaways/sailfishos as the rootfs -> tar extracts there
 #
 # Usage:   ./flash-kugo.sh <image-directory>
 # Example: ./flash-kugo.sh ~/Downloads/kugo-flash/sfe-kugo-waydroidfix-20260815
@@ -56,6 +56,7 @@ echo "   - if SFOS/Android with adb is running: attempted automatically"
 echo "   - otherwise: power off, hold Vol-UP + plug in USB (blue LED)"
 adb reboot bootloader 2>/dev/null || true
 echo "== Waiting for fastboot..."
+fastboot devices | grep -q . || echo "   (nothing happening? check permissions: on Arch install 'android-udev', or run with sudo)"
 fastboot devices | grep -q . || { while ! fastboot devices | grep -q .; do sleep 2; done; }
 fastboot devices
 
@@ -92,8 +93,11 @@ adb shell mount /data 2>/dev/null || true
 echo
 echo "== Pushing rootfs tar ($(du -h "$TAR" | cut -f1)) - takes a few minutes..."
 adb push "$TAR" /data/rootfs.tar
-echo "== Extracting on the device..."
-adb shell 'cd /data && tar --numeric-owner -xf rootfs.tar && rm rootfs.tar && sync'
+echo "== Extracting to /data/.stowaways/sailfishos (hybris-boot expects the rootfs there)..."
+adb shell 'mkdir -p /data/.stowaways/sailfishos && cd /data/.stowaways/sailfishos && tar --numeric-owner -xf /data/rootfs.tar && rm /data/rootfs.tar && sync'
+echo "== Verifying rootfs..."
+adb shell 'test -f /data/.stowaways/sailfishos/etc/sailfish-release && echo ROOTFS_OK' | grep -q ROOTFS_OK \
+    || { echo "ERROR: etc/sailfish-release not found under /data/.stowaways/sailfishos - extraction failed, NOT rebooting."; exit 1; }
 
 # --- 6. reboot -------------------------------------------------------------------
 echo
