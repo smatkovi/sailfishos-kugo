@@ -14,12 +14,23 @@ Sources: [droid-config](https://github.com/smatkovi/droid-config-sony-loire/tree
 - Xperia X Compact with **unlocked bootloader** (Sony official method;
   this permanently destroys the DRM keys)
 - **Android 8.1 stock firmware** and the Sony AOSP **OEM binary v13
-  (kernel 4.4, loire)** flashed at least once — the vendor blobs on /oem are required. Sony no longer lists
+  (kernel 4.4, loire)** flashed at least once, **in this order** — the stock
+  firmware includes `oem.sin` and overwrites the oem partition, so the OEM
+  binary always goes last. The vendor blobs on /oem are required. Sony no longer lists
   these downloads prominently; working sources:
-  - Stock firmware for F5321 (third-party XperiFirm archive):
+  - Stock firmware for F5321 (third-party XperiFirm archive, contains an
+    `.ftf` bundle):
     <https://samsony.net/en/firmwares/sony/F5321/download/1660> —
-    flash it with [newflasher](https://github.com/munjeni/newflasher)
-    or [xflasher](https://github.com/munjeni/xflasher)
+    flash the `.ftf` with [Flashtool](https://github.com/Androxyde/Flashtool)
+    (0.9.36.0, Linux tarball ships its own JRE; run `sudo ./FlashTool` and put
+    the `.ftf` into `/root/.flashTool/firmwares/`, then lightning icon →
+    Flashmode → tick all wipes → Flash). **Note:** `newflasher`/`xflasher` do
+    NOT work — kugo (2016) speaks the old S1 flash protocol (USB id
+    `0fce:adde`), newflasher only supports the 2017+ protocol (`0fce:b00b`).
+    Flashmode = device off, hold **Volume-Down** + plug in USB (green LED);
+    fastboot = hold **Volume-Up** + plug in USB (blue LED). The first Android
+    boot after flashing may take 5–15 minutes and doesn't need to be completed
+    — reaching the language screen is enough.
   - Sony OEM binary — MUST be the **kernel 4.4 v13** variant (SW_binaries_for_Xperia_Android_8.1.6.4_r1_v13_loire.zip); the kernel 4.9 binary does NOT work with this port:
     <https://opendevices.sony.net/file/download/software-binaries-for-aosp-oreo-android-8-1-kernel-4-4-loire-v13> —
     `fastboot flash oem SW_binaries_*loire*.img`
@@ -53,6 +64,7 @@ lbzip2 -dk sfe-kugo-*.tar.bz2
 fastboot flash boot hybris-boot.img
 fastboot flash recovery twrp-3.7.0_9-0-kugo.img
 # unplug USB, power off, hold Power + Volume-Down until TWRP appears
+# (first TWRP start asks "Keep System Read Only?" - swipe to allow modifications)
 # in TWRP: Wipe -> Format Data -> yes, then plug USB back in
 adb push sfe-kugo-*.tar /data/rootfs.tar
 adb shell 'mkdir -p /data/.stowaways/sailfishos && cd /data/.stowaways/sailfishos && tar --numeric-owner -xf /data/rootfs.tar && rm /data/rootfs.tar && sync'

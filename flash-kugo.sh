@@ -73,12 +73,13 @@ echo ">> NOW BOOT INTO TWRP MANUALLY:"
 echo "   1. unplug the USB cable"
 echo "   2. power the device off (hold Power if needed)"
 echo "   3. hold Power + Volume-DOWN until TWRP appears"
+echo "      (first start asks 'Keep System Read Only?' -> swipe to allow modifications)"
 echo "   4. plug the USB cable back in"
 echo "=============================================================="
 read -rp ">> Press Enter once TWRP is running and USB is connected... " _
 
 echo "== Waiting for TWRP/adb..."
-adb wait-for-device
+adb wait-for-recovery   # TWRP registers as 'recovery', not 'device'
 sleep 3
 
 # --- 4. format data ------------------------------------------------------------
