@@ -144,3 +144,4 @@ result is a permanently black Waydroid window.
 
 Flashing wipes your data and can brick your device. No warranty. Not affiliated
 with Jolla or Sony.
+todo: waydroid instructions with helper installed, picture fix daemon, egl libraries manifestation
