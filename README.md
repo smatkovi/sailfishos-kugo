@@ -73,75 +73,62 @@ adb reboot
 
 ## Waydroid setup
 
-The required vendor overlay and libhybris build are already included in the
-image. The Android system/vendor images are **not** shipped — download them
-manually. Do not use plain `waydroid init`: it fetches MAINLINE images from
-the OTA server, which do not work on this port.
-
-- System: <https://sourceforge.net/projects/waydroid/files/images/system/lineage/waydroid_arm64/>
-  (lineage-17.1 VANILLA arm64)
-- Vendor: <https://sourceforge.net/projects/waydroid/files/images/vendor/waydroid_arm64/>
-  (lineage-17.1 **HALIUM_10** arm64 — e.g.
-  `lineage-17.1-20260402-HALIUM_10-waydroid_arm64-vendor.zip`)
-
-Unzip both, put `system.img` and `vendor.img` into
-`/etc/waydroid-extra/images/`, then as root:
+The vendor overlay (Adreno GPU libraries and the patched gralloc), the fixup hook and the setup
+script are in the image (droid-config-kugo). The Android images aren't shipped. One command,
+as root, sets everything up:
 
 ```sh
-waydroid init -f    # must report "found custom images"
+devel-su kugo-waydroid-setup
 ```
 
-After every `init -f` the following corrections are required
-(`init -f` regenerates both files and reverts them each time). Verified
-against a working device; run as root:
+It installs `waydroid`, `waydroid-runner` and `waydroid-settings` from sailfishos:chum. Then it
+downloads LineageOS 17.1 VANILLA (system) and HALIUM_10 (vendor) from the Waydroid OTA index,
+checks their SHA-256 and unpacks them to `/etc/waydroid-extra/images` (about 1.6 GB). Finally
+it runs `waydroid init -f` and starts the container. Then start Android with the **Waydroid**
+icon. The first boot takes several minutes, because the apps are compiled; later starts are
+much quicker.
 
-```sh
-# (1)+(2) waydroid.cfg: HALIUM_10 vendor type, custom images path,
-#         anbox-* binder devices, aidl2 protocols
-CFG=/var/lib/waydroid/waydroid.cfg
-sed -i \
-  -e 's|^vendor_type *=.*|vendor_type = HALIUM_10|' \
-  -e 's|^images_path *=.*|images_path = /etc/waydroid-extra/images|' \
-  -e 's|^binder *=.*|binder = anbox-binder|' \
-  -e 's|^vndbinder *=.*|vndbinder = anbox-vndbinder|' \
-  -e 's|^hwbinder *=.*|hwbinder = anbox-hwbinder|' \
-  $CFG
-grep -q '^binder_protocol' $CFG || \
-  sed -i '/^hwbinder/a binder_protocol = aidl2
-service_manager_protocol = aidl2' $CFG
-sed -i \
-  -e 's|^binder_protocol *=.*|binder_protocol = aidl2|' \
-  -e 's|^service_manager_protocol *=.*|service_manager_protocol = aidl2|' \
-  $CFG
+`kugo-waydroid-fixup` runs before every container start, so the following survive
+`waydroid init -f` and package updates:
 
-# (3) config_nodes: mount the anbox-* host devices, NOT the host binders
-#     (source changes, the in-container target dev/... stays as is —
-#      otherwise servicemanager fails with "Device or resource busy")
-NODES=/var/lib/waydroid/lxc/waydroid/config_nodes
-sed -i \
-  -e 's|^lxc.mount.entry = /dev/binder dev/binder |lxc.mount.entry = /dev/anbox-binder dev/binder |' \
-  -e 's|^lxc.mount.entry = /dev/vndbinder dev/vndbinder |lxc.mount.entry = /dev/anbox-vndbinder dev/vndbinder |' \
-  -e 's|^lxc.mount.entry = /dev/hwbinder dev/hwbinder |lxc.mount.entry = /dev/anbox-hwbinder dev/hwbinder |' \
-  $NODES
+- `waydroid.cfg`: `vendor_type = HALIUM_10`, the custom images path, the `anbox-*` binder devices,
+  and `aidl2` protocols.
+- `config_nodes`: the `anbox-*` devices as source, not the host's binders. Otherwise
+  servicemanager fails with "Device or resource busy".
+- The overlay. 64-bit: the patched gralloc stack. 32-bit: the host's Adreno EGL and gralloc.
+  Without them the 32-bit zygote aborts ("couldn't find an OpenGL ES implementation") and Android
+  boots in a watchdog loop.
+- `cgroups.json` without the memory controller and cgroup2. Kernel 4.4 has no cgroup namespaces,
+  so the container's Android init otherwise locks the Sailfish session out of its cgroups:
+  user services fail with `status=219/CGROUP`, and restarting the home screen leaves a blank
+  screen.
+- `dnsmasq.service` off. It comes in as a waydroid dependency and holds port 53, so every
+  session ends at once ("Address already in use").
+- The properties `ro.hardware.gralloc=kugo` and `persist.waydroid.no_background_subsurface=true`.
+- `waydroid-runner` starts with `kugo-wlbuf.so` preloaded, which raises libwayland's 4 KiB client
+  buffer limit to 1 MiB. Otherwise Android's composer falls behind while an app opens, is dropped
+  ("error in client communication"), and the session ends.
+- Only one launcher. The package's own runs `waydroid show-full-ui`, which on an uninitialised
+  install would fetch the MAINLINE images that don't work here.
 
-# dnsmasq blocks waydroid-net's listening socket on 192.168.240.1:
-systemctl disable --now dnsmasq
-```
+Crashes of Android processes in the container are not sent to the Sailfish crash reporter
+(`kugo-core-filter`); Android keeps its own tombstones.
 
-Verify: `waydroid.cfg` must contain `vendor_type = HALIUM_10`, the three
-`binder` entries pointing at `anbox-*`, both protocols `aidl2`; the three
-binder lines in `config_nodes` must have `/dev/anbox-*` as source. More
-background (in German): [PORT-NOTES](https://github.com/smatkovi/droid-config-sony-loire/blob/kugo-sfos51/PORT-NOTES-kugo.md).
+**Do not add any of the following to the overlay:** `hwcomposer.*.so`,
+`android.hardware.graphics.composer@2.1-impl.so`, `android.hardware.graphics.mapper@2.0-impl.so`.
+A vendor hwcomposer in the overlay makes SurfaceFlinger delegate composition to hardware that is
+not reachable from the container (DEVICE instead of CLIENT composition), and the result is a
+permanently black Waydroid window.
 
-**Do not add any of the following to /var/lib/waydroid/overlay:**
-`hwcomposer.*.so`, `android.hardware.graphics.composer@2.1-impl.so`,
-`android.hardware.graphics.mapper@2.0-impl.so`. A vendor hwcomposer in the
-overlay makes SurfaceFlinger delegate composition to hardware that is not
-reachable from the container (DEVICE instead of CLIENT composition) — the
-result is a permanently black Waydroid window.
+More background (in German):
+[PORT-NOTES](https://github.com/smatkovi/droid-config-sony-loire/blob/kugo-sfos51/PORT-NOTES-kugo.md).
 
 ## Disclaimer
 
 Flashing wipes your data and can brick your device. No warranty. Not affiliated
 with Jolla or Sony.
-todo: waydroid instructions with helper installed, picture fix daemon, egl libraries manifestation
+Done (droid-config-kugo): the Waydroid helper (`kugo-waydroid-setup`); the EGL libraries, which
+kugo-materialize-vendor-libs copies out of /mnt at every boot; the picture fix. The `kugo-jpeg-fix`
+user service repairs saved photos (it inserts the missing JPEG DRI marker). The camera app's preview
+of a new photo needs the same fix in gst-droid's droidcamsrc:
+[ahjolinna/gst-droid](https://github.com/ahjolinna/gst-droid) (branches `kugo-dri-sfos51` and `kugo-dri-sfos52`).
